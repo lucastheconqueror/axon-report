@@ -2,12 +2,12 @@
 """
 Axon (AppLovin) Advertiser Report Fetcher
 
-Fetches advertiser reports from Axon's Reporting API and exports to CSV.
+Fetches advertiser reports from Axon's Reporting API and displays in terminal or exports to CSV.
 Documentation: https://support.axon.ai/en/growth/promoting-your-apps/api/reporting-api/
 
 Usage:
     python axon_report.py --api-key YOUR_API_KEY
-    python axon_report.py --api-key YOUR_API_KEY --start 2025-12-24 --end now --output report.csv
+    python axon_report.py --api-key YOUR_API_KEY -o report.csv
 """
 
 import argparse
@@ -45,7 +45,6 @@ def fetch_report(api_key: str, start_date: str, end_date: str) -> list[dict]:
     Returns:
         List of report data dictionaries
     """
-    # Build query parameters
     params = {
         "api_key": api_key,
         "start": start_date,
@@ -56,8 +55,6 @@ def fetch_report(api_key: str, start_date: str, end_date: str) -> list[dict]:
     }
     
     url = f"{BASE_URL}?{urlencode(params)}"
-    
-    print(f"Fetching report from {start_date} to {end_date}...")
     
     try:
         request = Request(url, headers={"User-Agent": "AxonReportFetcher/1.0"})
@@ -84,19 +81,58 @@ def fetch_report(api_key: str, start_date: str, end_date: str) -> list[dict]:
         raise RuntimeError(f"Failed to parse JSON response: {e}")
 
 
+def print_table(data: list[dict]) -> None:
+    """
+    Print report data as a formatted table to stdout.
+    """
+    if not data:
+        print("No data found.")
+        return
+    
+    headers = list(COLUMN_MAPPING.values())
+    
+    # Build rows
+    rows = []
+    for row in data:
+        rows.append([
+            row.get("day", ""),
+            row.get("campaign", ""),
+            row.get("campaign_id_external", ""),
+            row.get("country", ""),
+            f"{float(row.get('cost', 0)):.2f}" if row.get("cost") else "0.00",
+        ])
+    
+    # Calculate column widths
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(str(cell)))
+    
+    # Print separator
+    def sep():
+        print("+" + "+".join("-" * (w + 2) for w in widths) + "+")
+    
+    # Print header
+    sep()
+    print("|" + "|".join(f" {h:<{widths[i]}} " for i, h in enumerate(headers)) + "|")
+    sep()
+    
+    # Print rows
+    for row in rows:
+        print("|" + "|".join(f" {str(cell):<{widths[i]}} " for i, cell in enumerate(row)) + "|")
+    
+    sep()
+    print(f"\n{len(rows)} rows")
+
+
 def export_to_csv(data: list[dict], output_path: str) -> None:
     """
     Export report data to CSV file.
-    
-    Args:
-        data: List of report data dictionaries
-        output_path: Path to output CSV file
     """
     if not data:
-        print("Warning: No data to export.")
+        print("Warning: No data to export.", file=sys.stderr)
         return
     
-    # CSV headers in desired order
     csv_headers = list(COLUMN_MAPPING.values())
     
     with open(output_path, "w", newline="", encoding="utf-8") as f:
@@ -113,18 +149,17 @@ def export_to_csv(data: list[dict], output_path: str) -> None:
             ]
             writer.writerow(csv_row)
     
-    print(f"Exported {len(data)} rows to {output_path}")
+    print(f"Exported {len(data)} rows to {output_path}", file=sys.stderr)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fetch Axon (AppLovin) advertiser reports and export to CSV",
+        description="Fetch Axon (AppLovin) advertiser reports",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
     python axon_report.py --api-key YOUR_API_KEY
-    python axon_report.py --api-key YOUR_API_KEY --start 2025-12-24 --end now
-    python axon_report.py --api-key YOUR_API_KEY --output my_report.csv
+    python axon_report.py --api-key YOUR_API_KEY -o report.csv
         """,
     )
     
@@ -146,8 +181,8 @@ Examples:
     parser.add_argument(
         "--output",
         "-o",
-        default="axon_report.csv",
-        help="Output CSV file path (default: axon_report.csv)",
+        default=None,
+        help="Output CSV file path (if not specified, prints table to stdout)",
     )
     
     args = parser.parse_args()
@@ -168,13 +203,12 @@ Examples:
             sys.exit(1)
     
     try:
-        # Fetch report data
         data = fetch_report(args.api_key, args.start, args.end)
         
-        # Export to CSV
-        export_to_csv(data, args.output)
-        
-        print("Done!")
+        if args.output:
+            export_to_csv(data, args.output)
+        else:
+            print_table(data)
         
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
